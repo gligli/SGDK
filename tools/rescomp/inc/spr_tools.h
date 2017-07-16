@@ -4,6 +4,8 @@
 #include "tools.h"
 #include "tile_tools.h"
 
+#include <stdbool.h>
+
 
 #define SPRITE_SIZE(w, h)   ((((w) - 1) << 2) | ((h) - 1))
 
@@ -121,7 +123,7 @@ typedef struct
 
 
 frameSprite_* getFlippedFrameSprite(frameSprite_* frameSprite, int wf, int hf, int hflip, int vflip);
-frameSprite_* getFrameSprite(unsigned char *image8bpp, tileset_* tileset, int wi, int x, int y, int w, int h);
+frameSprite_* getFrameSprite(unsigned char *image8bpp, tileset_* tileset, int wi, int x, int y, int w, int h, bool * transp);
 animFrame_* getAnimFrame(unsigned char *image8bpp, int wi, int fx, int fy, int wf, int hf, int time, int collisionType);
 animation_* getAnimation(unsigned char *image8bpp, int wi, int anim, int wf, int hf, int time, int collisionType);
 spriteDefinition_* getSpriteDefinition(unsigned char *image8bpp, int w, int h, int wf, int hf, int time, int collisionType);

@@ -29,24 +29,73 @@ frameSprite_* getFlippedFrameSprite(frameSprite_* frameSprite, int wf, int hf, i
     return result;
 }
 
-frameSprite_* getFrameSprite(unsigned char *image8bpp, tileset_* tileset, int wi, int x, int y, int w, int h)
+static bool isFrameSpriteTransp(unsigned char *image8bpp, int wi, int x, int y, int w, int h)
 {
-    int i, j;
-    int pal, p;
-    int index;
-    unsigned int tile[8];
-    frameSprite_* result;
-
-    // get palette for this VDP sprite
-    pal = getTile(image8bpp, tile, x, y, wi * 8);
-    // error retrieving palette --> return NULL
-    if (pal == -1) return NULL;
+    int i, j, k;
+	unsigned int tile[8];
 
     for(i = 0; i < w; i++)
     {
         for(j = 0; j < h; j++)
         {
-            p = getTile(image8bpp, tile, i + x, j + y, wi * 8);
+            getTile(image8bpp, tile, i + x, j + y, wi * 8);
+	        for(k = 0; k < 8; k++)
+				if (tile[k])
+					return FALSE;
+		}
+	}
+	
+	return TRUE;
+}
+
+frameSprite_* getFrameSprite(unsigned char *image8bpp, tileset_* tileset, int wi, int x, int y, int w, int h, bool * transp)
+{
+    int i, j;
+    int pal, p;
+    int index;
+	int nw = w, nh = h, nx = x, ny = y;
+    unsigned int tile[8];
+    frameSprite_* result;
+	
+    // get palette for this VDP sprite
+    pal = getTile(image8bpp, tile, x, y, wi * 8);
+    // error retrieving palette --> return NULL
+    if (pal == -1) return NULL;
+
+	if (transp != NULL)
+	{
+		*transp = isFrameSpriteTransp(image8bpp, wi, nx, ny, nw, nh);
+		if (*transp) return NULL;
+
+		// try truncating right
+		while ((nw >> 1) && isFrameSpriteTransp(image8bpp, wi, nx + (nw >> 1), ny, (nw >> 1), nh))
+		{
+			nw = nw >> 1;		
+		}
+		// try truncating down
+		while ((nh >> 1) && isFrameSpriteTransp(image8bpp, wi, nx, ny + (nh >> 1), nw, (nh >> 1)))
+		{
+			nh = nh >> 1;		
+		}
+		// try truncating left
+		while ((nw >> 1) && isFrameSpriteTransp(image8bpp, wi, nx, ny, (nw >> 1), nh))
+		{
+			nw = nw >> 1;		
+			nx = nx + nw;
+		}
+		// try truncating up
+		while ((nh >> 1) && isFrameSpriteTransp(image8bpp, wi, nx, ny, nw, (nh >> 1)))
+		{
+			nh = nh >> 1;		
+			ny = ny + nh;
+		}
+	}
+	
+    for(i = 0; i < nw; i++)
+    {
+        for(j = 0; j < nh; j++)
+        {
+            p = getTile(image8bpp, tile, i + nx, j + ny, wi * 8);
 
             // error retrieving tile --> return NULL
             if (p == -1)
@@ -54,7 +103,7 @@ frameSprite_* getFrameSprite(unsigned char *image8bpp, tileset_* tileset, int wi
             // different palette in VDP same sprite --> error
             if (p != pal)
             {
-                printf("Error: Sprite at position (%d,%d) of size [%d,%d] use a different palette.", x, y, w, h);
+                printf("Error: Sprite at position (%d,%d) of size [%d,%d] use a different palette.", nx, ny, nw, nh);
                 return NULL;
             }
 
@@ -67,12 +116,12 @@ frameSprite_* getFrameSprite(unsigned char *image8bpp, tileset_* tileset, int wi
 
     // allocate result
     result = malloc(sizeof(frameSprite_));
-    // initialized afterward
-    result->x = 0;
-	result->y = 0;
-    result->w = w;
-    result->h = h;
-    result->numTile = w * h;
+    // updated afterward (relative position for now)
+    result->x = (nx - x) * 8;
+	result->y = (ny - y) * 8;
+    result->w = nw;
+    result->h = nh;
+    result->numTile = nw * nh;
 
     return result;
 }
@@ -88,6 +137,7 @@ animFrame_* getAnimFrame(unsigned char *image8bpp, int wi, int fx, int fy, int w
     frameSprite_** frameSprites;
     frameSprite_* frameSprite;
     tileset_* tileset;
+	bool isTransp;
 
     nbSprW = (wf + 3) / 4;
     nbSprH = (hf + 3) / 4;
@@ -106,13 +156,13 @@ animFrame_* getAnimFrame(unsigned char *image8bpp, int wi, int fx, int fy, int w
 
     // allocate frameSprite array (H,V,HV flipped version as well)
     frameSprites = malloc(4 * numSprite * sizeof(frameSprite_*));
-
+	
     result->frameSprites = frameSprites;
     result->tileset = tileset;
 	result->w = wf;
 	result->h = hf;
     result->timer = time;
-
+	
     if (collisionType == COLLISION_NONE) result->collision = NULL;
     else
     {
@@ -163,13 +213,38 @@ animFrame_* getAnimFrame(unsigned char *image8bpp, int wi, int fx, int fy, int w
             if (i == (nbSprW - 1)) ws = lastSprW;
             else ws = 4;
 
-            frameSprite = getFrameSprite(image8bpp, tileset, wi, (fx * wf) + (i * 4), (fy * hf) + (j * 4), ws, hs);
+            isTransp = false;
+			frameSprite = getFrameSprite(image8bpp, tileset, wi, (fx * wf) + (i * 4), (fy * hf) + (j * 4), ws, hs, &isTransp);
             if (frameSprite == NULL)
-                return NULL;
+			{
+				if (!isTransp)
+				{
+					return NULL;
+				}
+				else
+				{
+					result->numSprite--;
+					
+					if (result->numSprite > 0)
+					{
+						// adjust frameSprites for missing sprite
+						memmove(&result->frameSprites[result->numSprite * 1], &result->frameSprites[numSprite * 1 - 0],
+								3 * numSprite * sizeof(frameSprite_*));
+						memmove(&result->frameSprites[result->numSprite * 2], &result->frameSprites[numSprite * 2 - 1],
+								2 * numSprite * sizeof(frameSprite_*));
+						memmove(&result->frameSprites[result->numSprite * 3], &result->frameSprites[numSprite * 3 - 2],
+								1 * numSprite * sizeof(frameSprite_*));
+					}
+
+					numSprite = result->numSprite;
+					
+					continue;
+				}
+			}
 
             // set x and y offset
-            frameSprite->x = i * 32;
-            frameSprite->y = j * 32;
+            frameSprite->x += i * 32;
+            frameSprite->y += j * 32;
 
             // store frame sprite
             frameSprites[numSprite * 0] = frameSprite;
@@ -179,6 +254,17 @@ animFrame_* getAnimFrame(unsigned char *image8bpp, int wi, int fx, int fy, int w
             frameSprites++;
         }
     }
+	
+	if (!result->numSprite && wf && hf)
+	{
+		// add an empty sprite to avoid fully empty frame
+		frameSprite = getFrameSprite(image8bpp, tileset, wi, fx * wf, fy * hf, 1, 1, NULL);
+		result->frameSprites[0] = frameSprite;
+		result->frameSprites[1] = frameSprite;
+		result->frameSprites[2] = frameSprite;
+		result->frameSprites[3] = frameSprite;
+		result->numSprite = 1;
+	}
 
     return result;
 }
